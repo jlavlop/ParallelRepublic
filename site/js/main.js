@@ -1,6 +1,8 @@
 import { STR } from './i18n.js';
 import * as A from './analysis.js';
-import { drawFlag, drawCard } from './card.js';
+import { drawFlag, drawCard, hash } from './card.js';
+import { selectDiverse, composition } from './diversity.js';
+import { autoChronicle } from './chronicle.js';
 
 const PAL = ['#e8590c', '#1c7ed6', '#9c36b5', '#0ca678', '#d9a400', '#d6336c'];
 const MODEL = 'claude-sonnet-5-5';
@@ -36,7 +38,7 @@ let toastTimer = 0;
 function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3500); }
 
 /* ---------- estado ---------- */
-let ROWSDATA = null, COUNTRIES_GJ = null, ARTISTS = [], META = {};
+let ROWSDATA = null, COUNTRIES_GJ = null, ARTISTS = [], ARTIST_COUNTS = {}, TRADITIONS = {}, META = {};
 let CITIES = [], BYID = new Map(), TWINPOOL = [];
 let places = store.get('rp.places', []).filter((p) => p && isFinite(p.lat) && isFinite(p.lon));
 let reps = store.get('rp.reps', null);
@@ -68,11 +70,13 @@ function newRep(c, w, name) {
 /* ---------- carga ---------- */
 async function loadData() {
   const get = (f) => fetch('data/' + f).then((r) => { if (!r.ok) throw new Error(f + ' ' + r.status); return r.json(); });
-  const [rows, cities, countries, artists, meta] = await Promise.all([
+  const [rows, cities, countries, artists, traditions, meta] = await Promise.all([
     get('rows.json'), get('cities.json'), get('countries.geojson'),
-    get('artists.json').catch(() => []), get('meta.json').catch(() => ({})),
+    get('artists.json').catch(() => []), get('traditions.json').catch(() => ({})), get('meta.json').catch(() => ({})),
   ]);
-  ROWSDATA = A.prepareRows(rows); COUNTRIES_GJ = countries; ARTISTS = artists; META = meta;
+  ROWSDATA = A.prepareRows(rows); COUNTRIES_GJ = countries; META = meta; TRADITIONS = traditions || {};
+  ARTISTS = Array.isArray(artists) ? artists : (artists.list || []);
+  ARTIST_COUNTS = artists.counts || {};
   CITIES = cities.map(([gid, name, cc, lat, lon, pop]) => ({ id: 'g' + gid, name, cc, lat, lon, pop, n: norm(name) }));
   rebuildIndex();
 }
@@ -317,7 +321,7 @@ function renderDetail() {
 function paintFlag() {
   const r = curRep(), c = $('#flagMini'); if (!r || !c) return;
   const g = c.getContext('2d'); g.clearRect(0, 0, 216, 144); drawFlag(g, 0, 0, 216, 144, r);
-  const gen = gens[genKey(r)];
+  const gen = currentChron(r);
   $('#repMotto').textContent = gen && gen.motto ? '«' + gen.motto + '»' : rangeTxt(r);
 }
 function updateStats() {
@@ -340,12 +344,21 @@ function updateStats() {
   sel.innerHTML = `<option value="">${esc(t('cap_none'))}</option>` + opts.map((p) => `<option value="${p.id}"${cap && cap.id === p.id ? ' selected' : ''}>${esc(p.name)}${p.cc ? ' (' + esc(p.cc) + ')' : ''}</option>`).join('');
   renderArtists(r); renderRoute(r, a); paintFlag(); renderChron();
 }
+function diverseArtists(r) {
+  const cands = ARTISTS.filter((x) => A.inBand(r, x.lat));
+  return selectDiverse(cands, 12, { seed: hash(r.id) + (r.aseed || 0) * 104729, countryCounts: ARTIST_COUNTS, womenMin: 0.4, discoverShare: 0.5, maxPerCountry: 2, maxPerOcc: 3 });
+}
+const occLabel = (x) => { const occ = t('occ'); return x.o.map((o) => occ[o] || o.replace(/_/g, ' ')).join(', '); };
+const displayArtists = (list) => list.map((x) => ({ ...x, name: x[lang] || x.en, what: occLabel(x), born: x.b[lang === 'es' ? 0 : 1] || x.b[0] }));
 function renderArtists(r) {
-  const list = ARTISTS.filter((x) => A.inBand(r, x.lat)).slice(0, 14);
-  const occ = t('occ');
+  const list = displayArtists(diverseArtists(r));
+  const comp = composition(list);
   $('#repArtists').innerHTML = list.length
-    ? '<div>' + list.map((x) => `<div class="art"><span><a href="https://www.wikidata.org/wiki/${esc(x.id)}" target="_blank" rel="noopener">${esc(x[lang] || x.en)}</a> <em>${esc(x.o.map((o) => occ[o] || o).join(', '))}</em></span><span class="v">${x.y ? x.y : ''}</span><small>${esc(x.b[lang === 'es' ? 0 : 1] || x.b[0])} · ${fLat(x.lat)}</small></div>`).join('') + `</div><p class="note">${esc(t('artists_src'))}</p>`
+    ? '<div>' + list.map((x) => `<div class="art"><span><a href="https://www.wikidata.org/wiki/${esc(x.id)}" target="_blank" rel="noopener">${esc(x.name)}</a> <em>${esc(x.what)}</em>${x.disc ? `<span class="tag soft">${esc(t('discover'))}</span>` : ''}</span><span class="v">${x.y ? x.y : ''}</span><small>${esc(x.born)}${x.cc ? ', ' + esc(cname(x.cc)) : ''} · ${fLat(x.lat)}</small></div>`).join('') + '</div>'
+      + `<p class="note">${esc(t('comp', comp))} ${esc(t('artists_src'))}</p><div class="actions"><button class="btn sm" type="button" id="moreArtists">${esc(t('other_names'))}</button></div>`
     : `<p class="empty">${esc(t('no_artists'))}</p>`;
+  const b = $('#moreArtists');
+  if (b) b.onclick = () => { r.aseed = (r.aseed || 0) + 1; saveReps(); renderArtists(r); renderChron(); paintFlag(); };
 }
 function renderRoute(r, a) {
   const route = A.autoRoute(a.cities);
@@ -356,54 +369,68 @@ function renderRoute(r, a) {
   $('#repRoute').innerHTML = h || `<p class="empty">${esc(t('no_citizens'))}</p>`;
 }
 
-/* ---------- crónica (clave propia de la API de Anthropic) ---------- */
+/* ---------- crónica: automática (gratis) o escrita por Claude (clave propia) ---------- */
 let genBusy = null, genErr = '';
+const degLabel = (r) => A.bandFor(r.c).label;
+const aiFresh = (r) => { const g = gens[genKey(r)]; return g && Math.abs(g.c - r.c) < 1e-9 && Math.abs(g.w - r.w) < 1e-9 ? g : null; };
+function autoChron(r) {
+  const a = analysis(r);
+  return autoChronicle({
+    rep: r, a, cap: capitalOf(r), traditions: TRADITIONS, artists: displayArtists(diverseArtists(r)), lang,
+    seed: hash(r.id) + (r.cseed || 0) * 7919, cname, fmtInt: fmt.int, degLabel: degLabel(r),
+  });
+}
+const currentChron = (r) => aiFresh(r) || autoChron(r);
 function renderChron() {
   const r = curRep(), el = $('#chron'); if (!r || !el) return;
   const key = store.get('rp.key', '');
-  const g = gens[genKey(r)];
-  const fresh = g && Math.abs(g.c - r.c) < 1e-9 && Math.abs(g.w - r.w) < 1e-9;
+  const ai = aiFresh(r);
+  const g = ai || autoChron(r);
   let h = '<div class="box">';
-  if (!g && !genBusy) h += `<p class="note">${esc(t('chron_intro'))}</p>`;
+  h += `<p class="lead">«${esc(g.motto)}»</p><p><b>${esc(t('demonym'))}:</b> ${esc(g.demonym)} · <b>${esc(t('anthem'))}:</b> ${esc(g.anthem)}</p>`;
+  h += `<h4 class="eyebrow">${esc(t('folklore'))}</h4>` + String(g.folklore).split(/\n+/).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('');
+  if (g.traditions?.length) h += `<p class="note">${esc(t('trad_src'))} ${g.traditions.map((x) => `<a href="https://www.wikidata.org/wiki/${esc(x.id)}" target="_blank" rel="noopener">${esc(x.name)}</a>`).join(' · ')}</p>`;
+  if (g.trips?.length) h += `<h4 class="eyebrow">${esc(t('trips'))}</h4>` + g.trips.map((x) => `<div class="trip"><b>${esc(x.title)}</b><span class="stops">${(x.stops || []).map(esc).join(' → ')}</span><span>${esc(x.why)}</span></div>`).join('');
+  h += `<p class="note">${esc(ai ? t('gen_note') : t('auto_note'))}</p>`;
+  h += `<div class="actions">${ai ? `<button class="btn sm" type="button" id="aiDrop">${esc(t('ai_drop'))}</button>` : `<button class="btn sm" type="button" id="reroll">${esc(t('other_version'))}</button>`}</div>`;
+  // Opción avanzada: crónica escrita por Claude con la clave de la API del jugador.
+  h += `<details class="adv"${genBusy === r.id || genErr ? ' open' : ''}><summary>${esc(t('ai_title'))}</summary><div class="advbody">`;
+  h += `<p class="note">${esc(t('chron_intro'))}</p>`;
   if (genBusy === r.id) h += `<p><span class="spin"></span>${esc(t('generating'))}</p>`;
-  if (g) {
-    if (!fresh) h += `<p class="note">${esc(t('gen_stale'))}</p>`;
-    h += `<p class="lead">«${esc(g.motto)}»</p><p><b>${esc(t('demonym'))}:</b> ${esc(g.demonym)} · <b>${esc(t('anthem'))}:</b> ${esc(g.anthem)}</p>`;
-    h += `<h4 class="eyebrow">${esc(t('folklore'))}</h4>` + String(g.folklore).split(/\n+/).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('');
-    if (g.trips?.length) h += `<h4 class="eyebrow">${esc(t('trips'))}</h4>` + g.trips.map((x) => `<div class="trip"><b>${esc(x.title)}</b><span class="stops">${(x.stops || []).map(esc).join(' → ')}</span><span>${esc(x.why)}</span></div>`).join('');
-    h += `<p class="note">${esc(t('gen_note'))}</p>`;
-  }
   if (genErr) h += `<p class="note">${esc(t('gen_err', genErr))}</p>`;
-  if (!key) {
-    h += `<form class="keyrow" id="keyForm"><input class="field mono" id="apiKey" type="password" autocomplete="off" placeholder="${esc(t('key_ph'))}" aria-label="${esc(t('key_ph'))}"><button class="btn" type="submit">${esc(t('key_save'))}</button></form>`;
-  } else if (genBusy !== r.id) {
-    h += `<div class="actions"><button class="btn${g ? '' : ' primary'}" type="button" id="genBtn">${esc(g ? t('regen') : t('gen'))}</button><button class="btn sm" type="button" id="keyForget">${esc(t('key_forget'))}</button></div>`;
-  }
-  el.innerHTML = h + '</div>';
+  if (!key) h += `<form class="keyrow" id="keyForm"><input class="field mono" id="apiKey" type="password" autocomplete="off" placeholder="${esc(t('key_ph'))}" aria-label="${esc(t('key_ph'))}"><button class="btn" type="submit">${esc(t('key_save'))}</button></form>`;
+  else if (genBusy !== r.id) h += `<div class="actions"><button class="btn primary" type="button" id="genBtn">${esc(ai ? t('regen') : t('gen'))}</button><button class="btn sm" type="button" id="keyForget">${esc(t('key_forget'))}</button></div>`;
+  h += '</div></details></div>';
+  el.innerHTML = h;
+  const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
+  on('#reroll', () => { r.cseed = (r.cseed || 0) + 1; saveReps(); renderChron(); paintFlag(); });
+  on('#aiDrop', () => { delete gens[genKey(r)]; store.set('rp.gen', gens); renderChron(); paintFlag(); });
+  on('#genBtn', () => generate(r));
+  on('#keyForget', () => { store.del('rp.key'); renderChron(); });
   const kf = $('#keyForm');
   if (kf) kf.onsubmit = (e) => { e.preventDefault(); const v = $('#apiKey').value.trim(); if (!v) return; store.set('rp.key', v); toast(t('key_saved')); renderChron(); };
-  const gb = $('#genBtn'); if (gb) gb.onclick = () => generate(r);
-  const kg = $('#keyForget'); if (kg) kg.onclick = () => { store.del('rp.key'); renderChron(); };
 }
 function buildPrompt(r, a) {
   const cap = capitalOf(r);
   const cs = a.countries.map((c) => c.name + (c.pop ? ` (~${(c.pop / 1e6).toFixed(1)}M people in the band)` : '')).join(' → ');
   const cities = a.cities.slice(0, 50).map((p) => `${p.name} (${p.cc}) ${p.lat.toFixed(2)},${p.lon.toFixed(2)}`).join('; ');
-  const artists = ARTISTS.filter((x) => A.inBand(r, x.lat)).slice(0, 15).map((x) => `${x.en} (${x.o.join('/')}, born ${x.b[1]})`).join('; ');
+  const artists = diverseArtists(r).map((x) => `${x.en} (${x.o.join('/')}, born ${x.b[1]})`).join('; ');
+  const trads = a.countries.flatMap((c) => (TRADITIONS[c.key] || []).slice(0, 3).map((x) => `${x[1]} (${c.name})`)).slice(0, 25).join('; ');
   return `You are the playful chronicler of an imaginary "parallel republic": every place on Earth between latitudes ${(r.c - r.w).toFixed(2)} and ${(r.c + r.w).toFixed(2)} (signed degrees, south negative).
 Republic name: ${r.name}
 Capital: ${cap ? cap.name + ' (' + cap.cc + ')' : 'none yet'}
 Countries crossed west to east: ${cs || 'only ocean'}
 Largest cities inside: ${cities || 'none'}
-Famous artists born inside (from Wikidata): ${artists || 'none listed'}
+Artists born inside (from Wikidata, chosen for variety of gender, country and fame): ${artists || 'none listed'}
+UNESCO intangible heritage of those countries: ${trads || 'none listed'}
 Estimated population ${Math.round(a.pop / 1e6)} million; estimated GDP ${Math.round(a.gdp / 1e9)} billion USD.
 
 Write in ${lang === 'es' ? 'Spanish (Spain)' : 'English'}. Reply with ONLY one JSON object with these keys:
 "demonym": invented demonym (one or two words);
 "motto": a short national motto (max 8 words);
 "anthem": title of the national anthem;
-"folklore": two short paragraphs separated by a blank line (max 150 words) inventing a shared folklore that weaves together REAL traditions, festivals, foods or music from the regions in the band, naming each real tradition and where it comes from; you may mention the artists listed above;
-"trips": exactly 3 travel suggestions as objects {"title","stops":[3 to 5 real places inside the band, west to east],"why":"one sentence"}.`;
+"folklore": two short paragraphs separated by a blank line (max 150 words) inventing a shared folklore that weaves together REAL traditions from the list above or from the regions in the band, naming each real tradition and where it comes from; mention at least one woman from the artists list and avoid centring only the most famous names;
+"trips": exactly 3 travel suggestions as objects {"title","stops":[3 to 5 real places inside the band, west to east],"why":"one sentence"}, including at least one lesser-known place.`;
 }
 function extractJSON(text) {
   try { return JSON.parse(text); } catch { /* try the outermost braces */ }
@@ -438,7 +465,7 @@ async function generate(r) {
 function openCard() {
   const r = curRep(); if (!r) return;
   const cap = capitalOf(r);
-  drawCard($('#cardCv'), { rep: r, a: analysis(r), gen: gens[genKey(r)], cap, capName: cap ? cap.name : '', countries: COUNTRIES_GJ, t, fmt, rangeTxt: rangeTxt(r) });
+  drawCard($('#cardCv'), { rep: r, a: analysis(r), gen: currentChron(r), cap, capName: cap ? cap.name : '', countries: COUNTRIES_GJ, t, fmt, rangeTxt: rangeTxt(r) });
   const d = $('#cardDlg'); if (d.showModal) d.showModal(); else d.setAttribute('open', '');
 }
 $('#cardClose').onclick = () => { const d = $('#cardDlg'); if (d.close) d.close(); else d.removeAttribute('open'); };

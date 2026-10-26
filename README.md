@@ -10,7 +10,8 @@ Funda una república a lo largo de un paralelo y descubre qué ciudades, países
 - Para cada república: población y PIB estimados, superficie, países que atraviesa de oeste a este, ciudades, capital, artistas nacidos en la franja y una ruta por el paralelo.
 - Gemelos de latitud de cualquier ciudad y un botón «Sorpréndeme».
 - Ficha coleccionable en PNG con bandera generada, y enlace para compartir cada república.
-- Crónica opcional (lema, gentilicio, himno, folklore, viajes) escrita por Claude con la clave de la API de Anthropic de cada jugador, guardada solo en su navegador.
+- Crónica automática y gratuita (lema, gentilicio, himno, folklore y viajes) que combina tradiciones reales del Patrimonio Cultural Inmaterial de la UNESCO de los países de la franja. Como opción avanzada, Claude puede escribirla con la clave de la API de Anthropic de cada jugador, guardada solo en su navegador.
+- Personas ilustres nacidas en la franja elegidas con criterios de variedad: al menos un 40 % de mujeres cuando las hay, como máximo dos por país, varias disciplinas y la mitad de los puestos para figuras menos conocidas o de países poco representados.
 - Español e inglés.
 
 ## Datos
@@ -19,9 +20,12 @@ Funda una república a lo largo de un paralelo y descubre qué ciudades, países
 | --- | --- | --- |
 | Fronteras, población y PIB por país | [Natural Earth](https://www.naturalearthdata.com/) 1:50m admin-0 | Dominio público |
 | Ciudades de más de 15 000 habitantes | [GeoNames](https://www.geonames.org/) cities15000 | CC BY 4.0 |
-| Artistas y lugar de nacimiento | [Wikidata](https://www.wikidata.org/) | CC0 |
+| Artistas, género y lugar de nacimiento | [Wikidata](https://www.wikidata.org/) | CC0 |
+| Patrimonio Cultural Inmaterial de la UNESCO | [Wikidata](https://www.wikidata.org/) | CC0 |
 
-La población de una franja es una estimación: la de cada país se reparte un 60 % según dónde viven sus ciudades de más de 15 000 habitantes y un 40 % según la superficie que cae dentro de la franja. El PIB se reparte igual. `scripts/build-data.mjs` descarga las fuentes y genera `site/data/`; GitHub Actions lo ejecuta en cada cambio y el día 1 de cada mes.
+La población de una franja es una estimación: la de cada país se reparte un 60 % según dónde viven sus ciudades de más de 15 000 habitantes y un 40 % según la superficie que cae dentro de la franja. El PIB se reparte igual.
+
+Para los artistas, la consulta a Wikidata usa un listón de fama más bajo para las mujeres, para que no queden tapadas por la sobrerrepresentación masculina de las fuentes, e incluye disciplinas como la ilustración, el cómic, la cerámica o la coreografía. Después se guarda una selección variada por cada franja de 0,25°. `scripts/build-data.mjs` descarga las fuentes y genera `site/data/`; GitHub Actions lo ejecuta en cada cambio y el día 1 de cada mes.
 
 ## Estructura
 

@@ -88,6 +88,33 @@ export function parsePoint(wkt) {
   return m ? [+m[1], +m[2]] : null;
 }
 
+/** Index features for point lookups: [{key, rings, bbox}]. */
+export function indexFeatures(features, keyOf) {
+  return features.map((f) => {
+    const rings = ringsOf(f.geometry);
+    const b = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const r of rings) for (const [x, y] of r) { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; }
+    return { key: keyOf(f), rings, bbox: b };
+  });
+}
+
+/** Key of the feature containing [lon, lat] (even-odd), or null. */
+export function featureAt(index, lon, lat) {
+  for (const f of index) {
+    const b = f.bbox;
+    if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+    let inside = false;
+    for (const r of f.rings) {
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        const [xi, yi] = r[i], [xj, yj] = r[j];
+        if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+      }
+    }
+    if (inside) return f.key;
+  }
+  return null;
+}
+
 /** Trim a typed array to the [r0, r1] range of non-empty rows and round values. */
 export function packRows(arr, r0, r1, digits = 0) {
   const f = 10 ** digits;

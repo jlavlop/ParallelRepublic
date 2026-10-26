@@ -52,3 +52,14 @@ test('roundGeom rounds nested coordinates', () => {
   const g = roundGeom({ type: 'MultiPolygon', coordinates: [[[[1.23456, 2.34567], [3, 4]]]] }, 2);
   assert.deepEqual(g.coordinates, [[[[1.23, 2.35], [3, 4]]]]);
 });
+
+test('featureAt finds the containing feature', async () => {
+  const { indexFeatures, featureAt } = await import('../scripts/lib.mjs');
+  const idx = indexFeatures([
+    { properties: { k: 'AA' }, geometry: { type: 'Polygon', coordinates: [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]] } },
+    { properties: { k: 'BB' }, geometry: { type: 'MultiPolygon', coordinates: [[[[20, 0], [30, 0], [30, 10], [20, 10], [20, 0]]]] } },
+  ], (f) => f.properties.k);
+  assert.equal(featureAt(idx, 5, 5), 'AA');
+  assert.equal(featureAt(idx, 25, 5), 'BB');
+  assert.equal(featureAt(idx, 15, 5), null);
+});
