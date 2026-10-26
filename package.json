@@ -1,0 +1,13 @@
+{
+  "name": "parallel-republic",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Found a republic along a parallel of latitude and discover who shares it.",
+  "type": "module",
+  "scripts": {
+    "data": "node scripts/build-data.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "python3 -m http.server 8000 --directory site"
+  },
+  "engines": { "node": ">=20" }
+}
